@@ -1,55 +1,98 @@
-use num_bigint::BigInt;
-use num_integer::Integer;
-use num_rational::Ratio;
-use num_traits::{identities::Zero, sign::abs};
-use std::ops::{Mul, Sub};
+use image::{ImageBuffer, Rgb};
+use rug::Float;
 
 struct SquaresComplex {
-    z_real: Ratio<BigInt>,
-    z_imaginary: Ratio<BigInt>,
-    c_real: Ratio<BigInt>,
-    c_imaginary: Ratio<BigInt>,
+    z_real: Float,
+    z_imaginary: Float,
+    c_real: Float,
+    c_imaginary: Float,
+    prec: u32,
 }
 
 impl Iterator for SquaresComplex {
-    type Item = (Ratio<BigInt>, Ratio<BigInt>);
+    type Item = (Float, Float);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let curr_real = self.z_real.clone();
-        let curr_imaginary = self.z_imaginary.clone();
+        let (new_real, new_imaginary) = {
+            let curr_real = &self.z_real;
+            let c_imaginary = &self.c_imaginary;
+            let c_real = &self.c_real;
+            let curr_imaginary = &self.z_imaginary;
 
-        self.z_real =
-            (&self.z_real * &self.z_real) - (&self.z_imaginary * &self.z_imaginary) + &self.c_real;
-        self.z_imaginary = (Ratio::from_integer(BigInt::from(2_u8))
-            * &self.z_real
-            * &self.z_real
-            * &self.z_imaginary)
-            + &self.c_imaginary;
+            let new_real = Float::with_val(
+                self.prec,
+                Float::with_val(
+                    self.prec,
+                    (curr_real * curr_real) - (curr_imaginary * curr_imaginary),
+                ) + c_real,
+            );
+            let new_imaginary = Float::with_val(
+                self.prec,
+                Float::with_val(4, 2_u8) * curr_real * curr_imaginary + c_imaginary,
+            );
 
-        if (&self.z_real * &self.z_real) + (&self.z_imaginary * &self.z_imaginary)
-            > Ratio::from_integer(BigInt::from(4_u8))
+            (new_real, new_imaginary)
+        };
+
+        self.z_real = new_real.clone();
+        self.z_imaginary = new_imaginary.clone();
+
+        if Float::with_val(
+            self.prec,
+            (&self.z_real * &self.z_real) + (&self.z_imaginary * &self.z_imaginary),
+        ) > Float::with_val(4, 4_u8)
         {
             None
         } else {
-            Some((curr_real, curr_imaginary))
+            Some((new_real, new_imaginary))
         }
     }
 }
 
-fn square_iter(c_real: Ratio<BigInt>, c_imaginary: Ratio<BigInt>) -> SquaresComplex {
+fn square_iter(prec: u32, c_real: Float, c_imaginary: Float) -> SquaresComplex {
     SquaresComplex {
-        z_real: Ratio::from_integer(BigInt::zero()),
-        z_imaginary: Ratio::from_integer(BigInt::zero()),
+        z_real: Float::with_val(4, 0),
+        z_imaginary: Float::with_val(4, 0),
         c_real,
         c_imaginary,
+        prec,
     }
 }
 
 fn main() {
-    let start = Ratio::new(BigInt::from(-3_i8), BigInt::from(5_i8));
-    let end = Ratio::from_integer(BigInt::zero());
+    const DOMAIN_PREC: u32 = 3;
+    const RESOLUTION_PREC: u32 = 12;
+    const TAKE: usize = 1000;
 
-    for i in square_iter(start, end) {
-        println!("({}, {})", i.0.to_string(), i.1.to_string());
-    }
+    const PREC: u32 = DOMAIN_PREC + RESOLUTION_PREC + 10;
+
+    let domain: [Float; 2] = [Float::with_val(PREC, -1.5_f32), Float::with_val(PREC, 0.5_f32)];
+    let range: [Float; 2] = [Float::with_val(PREC, -1_f32), Float::with_val(PREC, 1_f32)];
+
+    const X_RESOLUTION: u32 = 1440;
+    const Y_RESOLUTION: u32 = 1080;
+
+    let x_step = Float::with_val(
+        PREC,
+        Float::with_val(PREC, &domain[1] - &domain[0]) / Float::with_val(PREC, X_RESOLUTION),
+    );
+    let y_step = Float::with_val(
+        PREC,
+        Float::with_val(PREC, &range[1] - &range[0]) / Float::with_val(PREC, Y_RESOLUTION),
+    );
+
+    let img = ImageBuffer::from_fn(X_RESOLUTION, Y_RESOLUTION, |x, y| {
+        let x_val = &domain[0] + Float::with_val(PREC, x * &x_step);
+        let y_val = &range[0] + Float::with_val(PREC, y * &y_step);
+        let i = square_iter(PREC, x_val, y_val).take(TAKE).count();
+
+        if i == TAKE {
+            Rgb([0, 0, 0])
+        } else {
+            let pos = ((i / 1000) * 255) as u8;
+            Rgb([pos / 3, 255, 0])
+        }
+    });
+
+    img.save("Test 2.png").ok();
 }
