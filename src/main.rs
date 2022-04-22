@@ -1,5 +1,6 @@
 use image::{ImageBuffer, Rgb};
 use palette::{Gradient, LinSrgb};
+use rayon::prelude::*;
 use rug::{Complex, Float};
 
 const DOMAIN_PREC: u32 = 20;
@@ -64,27 +65,42 @@ fn main() {
         Float::with_val(PREC, &range[1] - &range[0]) / Float::with_val(PREC, Y_RESOLUTION),
     );
 
-    let img = ImageBuffer::from_fn(X_RESOLUTION, Y_RESOLUTION, |x, y| {
-        let x_val = &domain[0] + Float::with_val(PREC, x * &x_step);
-        let y_val = &range[0] + Float::with_val(PREC, y * &y_step);
-        let i = square_iter(Complex::with_val(PREC, (x_val, y_val)))
-            .take(TAKE)
-            .count();
+    let mut img = ImageBuffer::new(X_RESOLUTION, Y_RESOLUTION);
 
-        if i == TAKE {
-            Rgb([0, 0, 0])
-        } else {
-            let pos = i as f64 / TAKE as f64;
-            let color = gradient.get(pos);
-            Rgb(unsafe {
-                [
-                    (color.red * 255_f64).to_int_unchecked::<u8>(),
-                    (color.green * 255_f64).to_int_unchecked::<u8>(),
-                    (color.blue * 255_f64).to_int_unchecked::<u8>(),
-                ]
-            })
-        }
-    });
+    for (x, y, p) in (0..X_RESOLUTION)
+        .into_par_iter()
+        .flat_map(move |x| (0..Y_RESOLUTION).into_par_iter().map(move |y| (x, y)))
+        .map(|(x, y)| {
+            let x_val = &domain[0] + Float::with_val(PREC, x * &x_step);
+            let y_val = &range[0] + Float::with_val(PREC, y * &y_step);
 
-    img.save("Test 2.png").ok();
+            let i = square_iter(Complex::with_val(PREC, (x_val, y_val)))
+                .take(TAKE)
+                .count();
+
+            if i == TAKE {
+                (x, y, Rgb([0, 0, 0]))
+            } else {
+                let pos = i as f64 / TAKE as f64;
+                let color = gradient.get(pos);
+
+                (
+                    x,
+                    y,
+                    Rgb(unsafe {
+                        [
+                            (color.red * 255_f64).to_int_unchecked::<u8>(),
+                            (color.green * 255_f64).to_int_unchecked::<u8>(),
+                            (color.blue * 255_f64).to_int_unchecked::<u8>(),
+                        ]
+                    }),
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+    {
+        img.put_pixel(x, y, p);
+    }
+
+    img.save("Test 3.png").ok();
 }
